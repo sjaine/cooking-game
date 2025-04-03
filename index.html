@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Londrina+Solid:wght@100;300;400;900&family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+  <script src="https://kit.fontawesome.com/cff1dcbb48.js" crossorigin="anonymous"></script>
+  
+  <title>Simple Cooking Game</title>
+  <style>
+    /* 배경색을 #FEFCE7로 변경 */
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #FEFCE7;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+    #soundToggle {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 20;
+      font-size: 30px;
+      color: #5B3303; /* 초기값: 재생 중 색상 */
+      cursor: pointer;
+    }
+    
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #5B3303;
+      font-family: "Manrope", sans-serif;
+      z-index: 10;
+    }
+    /* Cook 버튼: 데스크탑에서는 우측 하단, 모바일에서는 중앙 하단 */
+    #cookButton {
+      position: absolute;
+      bottom: 26px;
+      background-color: #F8DCAD;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      font-size: 36px;
+      border-radius: 6px;
+      border: solid 2px;
+      z-index: 10;
+      font-family: "Londrina Solid", sans-serif;
+      font-weight: 800;
+      font-style: normal;
+      color: #5B3303;
+      border-color: rgb(91, 51, 3);
+      box-shadow: 2px 2px 7px 2px rgb(60 53 45 / 30%)
+    }
+    /* 호버 레이블 스타일 */
+    #hoverLabel {
+      position: absolute;
+      pointer-events: none;
+      color: white;
+      font-family: Manrope, sans-serif;
+      font-size: 12px;
+      display: none;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 4px;
+      border-radius: 4px;
+      z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <audio id="bgm" src="assets/boba.mp3" autoplay loop muted></audio>
+  <audio id="clickSound" src="assets/Click.mp3" preload="none"></audio>
+  <div id="soundToggle">
+    <i class="fa-solid fa-music"></i>
+  </div>
+  <!-- 좌측 상단 UI: 카운터 및 Heat 상태 -->
+  <div id="ui">
+    <div>Noodle: <span id="noodleCount">0</span></div>
+    <div>Onion: <span id="onionCount">0</span></div>
+    <div>Spice: <span id="spiceCount">0</span></div>
+    <div>Egg: <span id="eggCount">0</span></div>
+    <div>Heat: <span id="heatState">OFF</span></div>
+  </div>
+
+  <!-- 배경 음악 -->
+  <script>
+    const bgm = document.getElementById("bgm");
+    const soundToggle = document.getElementById("soundToggle");
+    bgm.volume = 0.2;
+    // 페이지 로드 시 자동 재생 시도
+    window.addEventListener("load", () => {
+      // 1. muted 상태로 play 시도
+      bgm.muted = true;
+      bgm.play().then(() => {
+        console.log("Muted autoplay succeeded");
+  
+        // 2. 0.5초 후 mute 해제 (브라우저가 허용할 가능성 높아짐)
+        setTimeout(() => {
+          bgm.muted = false;
+          soundToggle.style.color = "#5B3303";
+        }, 10);
+      }).catch((err) => {
+        console.log("Autoplay failed. Interaction required:", err);
+        soundToggle.style.color = "#ACAFA8"; // 실패 시 회색으로 설정
+      });
+    });
+  
+    // 유저가 클릭해서 직접 mute / unmute
+    soundToggle.addEventListener("click", () => {
+      playClickSound();
+      bgm.muted = !bgm.muted;
+      soundToggle.style.color = bgm.muted ? "#ACAFA8" : "#5B3303";
+    });
+
+    function playClickSound() {
+  const clickSound = document.getElementById("clickSound");
+  clickSound.currentTime = 0; // 매번 처음부터 재생
+  clickSound.play().catch(e => console.log("Click sound play error:", e));
+}
+  </script>
+
+  <!-- 하단 중앙 Cook 버튼 -->
+  <button id="cookButton">COOK <i class="fa-sharp fa-solid fa-arrow-right"></i></button>
+
+  <!-- 마우스 호버시 표시될 레이블 -->
+  <div id="hoverLabel"></div>
+
+  <!-- Three.js 라이브러리 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- GLTFLoader (Three.js 확장 라이브러리) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script>
+    // 전역 변수 (카운터 및 Heat 상태)
+    let noodleCount = 0, onionCount = 0, spiceCount = 0, eggCount = 0;
+    let heatStateIndex = 0;
+    const heatStates = ["OFF", "LOW", "MID", "HIGH"];
+
+    // Three.js 기본 변수 및 드래그 관련 변수
+    let scene, camera, renderer;
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+    let dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    let selectedObject = null;
+    let offset = new THREE.Vector3();
+
+let controlModel;            // 원래 코드랑 충돌 방지 위해 이름 남겨둘 수 있어
+let controlLogicModel;       // 진짜 로직용 (숨김 처리)
+let controlVisibleModel;     // 사용자에게 보이는 가짜 (MeshBasicMaterial)
+
+
+    // 드래그 가능한 오브젝트 배열 (원본은 씬에 남아 있음)
+    let draggableObjects = [];
+    // 고정된 Heat 스프라이트 (클릭 버튼으로 사용)
+    let fixedHeatSprite;
+
+    init();
+    animate();
+
+    // 헬퍼 함수: Raycaster가 반환한 객체가 Mesh일 경우, 상위의 draggable 객체를 찾아줍니다.
+    function getDraggableObject(object) {
+      while (object && !object.userData.draggable) {
+        object = object.parent;
+      }
+      return object;
+    }
+    function createBackgroundPlane(texture) {
+  // 이미지 자체의 비율 가져오기
+  const imageAspect = texture.image.width / texture.image.height;
+  const screenAspect = window.innerWidth / window.innerHeight;
+
+  let planeWidth, planeHeight;
+
+  if (screenAspect < imageAspect) {
+    // 화면이 더 세로로 길면 -> 높이를 기준으로 맞추고, 너비는 비율로 계산
+    planeHeight = 12;
+    planeWidth = planeHeight * imageAspect;
+  } else {
+    // 화면이 더 가로로 길면 -> 너비를 기준으로 맞추고, 높이는 비율로 계산
+    planeWidth = 12 * screenAspect;
+    planeHeight = planeWidth / imageAspect;
+  }
+
+  const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+  const material = new THREE.MeshBasicMaterial({ map: texture });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.z = -1;
+  scene.add(mesh);
+}
+
+const loader = new THREE.TextureLoader();
+loader.load("assets/bg-test.jpg", (texture) => {
+  createBackgroundPlane(texture);
+});
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 0, 12);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.shadowMap.enabled = true; // 그림자 활성화
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0xFEFCE7, 1); // 배경색 설정
+      document.body.appendChild(renderer.domElement);
+
+      
+      // 예: 강도를 0.3으로 줄임
+      const ambientLight = new THREE.AmbientLight(0xfdfdfd, 0);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xfdfdfd, 0.5);
+      directionalLight.position.set(-10, 5, 10); // 왼쪽, 위, 앞쪽에서 빛이 옵니다.
+      directionalLight.castShadow = true; // 그림자 효과도 적용 가능
+      scene.add(directionalLight);
+
+
+
+      // 중앙 Pot (고정)
+      const pot = createTextSprite("Pot", { fontsize: 40 });
+      pot.position.set(0, 0, 0);
+      scene.add(pot);
+
+      // 고정 Heat 스프라이트 (클릭 시 색상 변경, pot 아래쪽)
+      fixedHeatSprite = createTextSprite("Heat", { fontsize: 22 });
+      fixedHeatSprite.position.set(0, -1.5, 0);
+      scene.add(fixedHeatSprite);
+      updateFixedHeatSprite(); // 초기 상태 반영
+
+      // 스플라인에서 내보낸 에셋(GLB 파일)으로 재료들을 로드 (위치: pot 위쪽 한 줄)
+   
+      
+      // 배치 범위와 최소 간격 설정 (필요에 따라 조절)
+      const ingredients = [
+        { type: "Noodle", url: "assets/noodle.glb" },
+        { type: "Onion",  url: "assets/onion.glb" },
+        { type: "Spice",  url: "assets/spice.glb" },
+        { type: "Egg",    url: "assets/egg.glb" }
+      ];
+      
+      // 배치 범위 설정 (필요에 따라 조절)
+      const minX = -1.2, maxX = 1.3, minY = 0, maxY = 3;
+      
+      // 이미 배치된 모델 정보를 저장하는 배열 (위치와 approximate 반지름)
+      const placedModels = [];
+
+      // 겹치지 않는 위치를 생성하는 함수 (bounding box 반지름 기반)
+      function generateNonOverlappingPosition(existingModels, minX, maxX, minY, maxY, newRadius) {
+        let pos;
+        let attempts = 0;
+        do {
+          pos = new THREE.Vector3(
+            Math.random() * (maxX - minX) + minX,
+            Math.random() * (maxY - minY) + minY,
+            0
+          );
+          attempts++;
+          // 만약 100회 이상 시도했음에도 조건을 만족하지 못하면 break
+          if (attempts > 100) break;
+        } while(existingModels.some(existing => pos.distanceTo(existing.pos) < (existing.radius + newRadius)));
+        return pos;
+      }
+
+      // GLTFLoader를 사용해 재료 모델 로드 및 배치
+      function loadIngredientModel(item) {
+        const loader = new THREE.GLTFLoader();
+        loader.load(item.url, function(gltf) {
+          const model = gltf.scene;
+
+          // 모델의 bounding box를 계산하여 approximate 반지름을 구함
+          const bbox = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const radius = size.length() / 2; // 대략적인 크기
+          
+          // bounding box 반지름을 고려해 겹치지 않는 위치 생성
+          const pos = generateNonOverlappingPosition(placedModels, minX, maxX, minY, maxY, radius);
+          // 생성된 위치와 반지름 정보를 배열에 저장
+          placedModels.push({ pos: pos, radius: radius });
+          
+          model.position.copy(pos);
+          model.userData = { type: item.type, draggable: true };
+          scene.add(model);
+          draggableObjects.push(model);
+        }, undefined, function(error) {
+          console.error("Error loading model:", error);
+        });
+      }
+
+      // 각 재료를 로드합니다.
+      ingredients.forEach((item) => {
+        loadIngredientModel(item);
+      });
+
+      // burner.glb asset loading
+      function loadBurnerModel() {
+        const loader = new THREE.GLTFLoader();
+        loader.load("assets/burner.glb", function(gltf) {
+          const model = gltf.scene;
+
+          // 크기 조절: 가로 화면 비율에 맞추어 width 기준으로 스케일링
+          const desiredWidth = 12; // 화면 폭 기준
+          const bbox = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const scale = desiredWidth / size.x;
+          model.scale.setScalar(scale);
+
+          // 위치 조절: 화면의 하단 1/3 높이, z는 뒤로 설정 (예: -2)
+          model.position.set(-0.05, -3.6, 3); // y 값은 화면 비율에 따라 조절 가능
+          model.scale.set(0.95, 1, 0.95);
+
+          burnerModel = model;
+
+          // 특정 색상을 가진 Mesh에 태그 지정
+          model.traverse((child) => {
+            if (child.isMesh) {
+              const hexColor = child.material.color.getHexString().toUpperCase();
+              if (hexColor === '9D0F0F') {
+                child.userData.isBurnerHeat = true;
+              }
+            }
+          });
+
+          scene.add(model);
+          
+          model.traverse((child) => {
+      if (child.isMesh && child.userData.isBurnerHeat) {
+        child.visible = (heatStates[heatStateIndex] !== "OFF");
+      }
+    });
+
+        }, undefined, function(error) {
+          console.error("Error loading burner model:", error);
+        });
+      }
+      
+      //control.glb asset loading
+      function loadControlModel() {
+        const loader = new THREE.GLTFLoader();
+        loader.load("assets/control.glb", function (gltf) {
+          const model = gltf.scene;
+
+          // 크기 조절: burner와 비슷한 폭 기준으로 조정
+          const desiredWidth = 12; // 같은 기준 사용
+          const bbox = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const scale = desiredWidth / size.x;
+          model.scale.setScalar(scale);
+
+          // 위치 조절: y는 burner와 동일 (-4.2), z는 burner보다 앞 (예: -1.5)
+          model.position.set(0, -1.6, 3);
+          model.scale.set(1.5, 1.5, 1.5);
+
+          // 모델 저장
+          controlModel = model;
+
+          // 클릭 이벤트를 위한 userData 추가
+          controlModel.userData = { isControl: true };
+          
+
+          scene.add(controlModel);
+
+          
+          }, undefined, function (error) {
+          console.error("Error loading control model:", error);
+          });
+
+          
+      }
+
+      loadBurnerModel();
+      loadControlModel();
+
+      // 이벤트 리스너 등록
+      renderer.domElement.addEventListener('mousedown', onMouseDown, false);
+      renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+      renderer.domElement.addEventListener('mouseup', onMouseUp, false);
+      window.addEventListener('resize', onWindowResize, false);
+      document.getElementById("cookButton").addEventListener("click", () => {
+        playClickSound(); // 🔊 사운드 먼저
+        onCook(); // 🍳 요리 판정 실행
+      });
+    }
+
+    // UI 업데이트: 좌측 UI 카운터와 Heat 텍스트 업데이트
+    function updateUI() {
+      document.getElementById("noodleCount").textContent = noodleCount;
+      document.getElementById("onionCount").textContent = onionCount;
+      document.getElementById("spiceCount").textContent = spiceCount;
+      document.getElementById("eggCount").textContent = eggCount;
+      document.getElementById("heatState").textContent = heatStates[heatStateIndex];
+      playClickSound();
+    }
+    fixedHeatSprite.visible = false;
+
+    // 고정 Heat 스프라이트의 텍스처를 상태에 따라 (OFF/LOW/MID/HIGH) 색상 변경
+    function updateFixedHeatSprite() {
+      let bgColor;
+      switch (heatStates[heatStateIndex]) {
+        case "LOW":  bgColor = "yellow"; break;
+        case "MID":  bgColor = "orange"; break;
+        case "HIGH": bgColor = "red";    break;
+        default:     bgColor = "white";  break; // OFF
+      }
+
+      let fontsize = 20, fontface = "Arial", borderThickness = 2;
+      let canvas = document.createElement('canvas');
+      let context = canvas.getContext('2d');
+      context.font = fontsize + "px " + fontface;
+
+      let metrics = context.measureText("Heat");
+      let textWidth = metrics.width;
+      canvas.width = textWidth + borderThickness * 4;
+      canvas.height = fontsize * 1.4 + borderThickness * 4;
+
+      // 배경색 적용
+      context.fillStyle = bgColor;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 테두리
+      context.strokeStyle = "rgba(0,0,0,1.0)";
+      context.lineWidth = borderThickness;
+      context.strokeRect(0, 0, canvas.width, canvas.height);
+
+      // 텍스트
+      context.fillStyle = "black";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.font = fontsize + "px " + fontface;
+      context.fillText("Heat", canvas.width / 2, canvas.height / 2);
+
+      let texture = new THREE.Texture(canvas);
+      texture.needsUpdate = true;
+      fixedHeatSprite.material.map = texture;
+    }
+
+    // GLTFLoader를 사용해 스플라인 에셋(GLB 파일) 로드
+    function loadIngredientModel(item, position) {
+      const loader = new THREE.GLTFLoader();
+      loader.load(item.url, function(gltf) {
+        const model = gltf.scene;
+        model.position.copy(position);
+        // 드래그 및 인터랙션을 위해 사용자 데이터 추가
+        model.userData = { type: item.type, draggable: true };
+        scene.add(model);
+        draggableObjects.push(model);
+      }, undefined, function(error) {
+        console.error("Error loading model:", error);
+      });
+    }
+
+    function onMouseDown(event) {
+      event.preventDefault();
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      // 고정 Heat 스프라이트 클릭 체크
+      let heatIntersects = raycaster.intersectObject(fixedHeatSprite);
+      if (heatIntersects.length > 0) {
+        heatStateIndex = (heatStateIndex + 1) % heatStates.length;
+        updateUI();
+        return;
+      }
+
+      
+
+      // 🔥 controlModel 클릭 체크
+      if (controlModel) {
+  const intersects = raycaster.intersectObject(controlModel, true);
+  if (intersects.length > 0) {
+    heatStateIndex = (heatStateIndex + 1) % heatStates.length;
+
+    const angles = [0, -45, -90, -155];
+    const rad = THREE.MathUtils.degToRad(angles[heatStateIndex]);
+    controlModel.rotation.z = rad;
+
+    updateUI(); // 왼쪽 UI 갱신
+
+    // 🔥 여기서 색상도 업데이트 해줘야 함!
+    if (burnerModel) {
+      const stateColorMap = {
+        "LOW": 0xFFB300,
+        "MID": 0xFF6600,
+        "HIGH": 0xFF3C00
+      };
+
+      burnerModel.traverse((child) => {
+        if (child.isMesh && child.userData.isBurnerHeat) {
+          if (heatStates[heatStateIndex] === "OFF") {
+            child.visible = false;
+          } else {
+            child.visible = true;
+            child.material = child.material.clone(); // 꼭 복제!
+            child.material.color.setHex(stateColorMap[heatStates[heatStateIndex]]);
+          }
+        }
+      });
+    }
+
+    return; // 💥 이 return 위에서 모든 동작을 마쳐야 함!
+  }
+}
+
+      
+      if (burnerModel) {
+        const stateColorMap = {
+          "LOW": 0xFFB300,   // 노랑
+          "MID": 0xFF6600,   // 주황
+          "HIGH": 0xFF3C00   // 원래 색상으로 복구
+        };
+
+        burnerModel.traverse((child) => {
+          if (child.isMesh && child.userData.isBurnerHeat) {
+            if (heatStates[heatStateIndex] === "OFF") {
+              child.visible = false;
+            } else {
+              child.visible = true;
+              child.material = child.material.clone(); // 재질 복제
+              child.material.color.setHex(stateColorMap[heatStates[heatStateIndex]]);
+            }
+          }
+        });
+      }
+
+      
+      // draggableObjects의 모든 자식까지 포함해서 인터섹션 계산
+      let intersects = raycaster.intersectObjects(draggableObjects, true);
+      if (intersects.length > 0) {
+        // 클릭된 객체의 상위 draggable 객체 찾기
+        let original = getDraggableObject(intersects[0].object);
+        if (!original) return;
+        // 전체 복제 (deep clone)
+        selectedObject = original.clone(true);
+        selectedObject.userData = original.userData;
+        selectedObject.position.copy(original.position);
+        scene.add(selectedObject);
+
+        let intersection = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragPlane, intersection);
+        offset.copy(selectedObject.position).sub(intersection);
+      }
+    }
+
+    function onMouseMove(event) {
+      event.preventDefault();
+      if (selectedObject) {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        let intersection = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+          selectedObject.position.copy(intersection.add(offset));
+        }
+      } else {
+        // 드래그 중이 아닐 때, 호버 레이블 표시
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        let intersects = raycaster.intersectObjects(draggableObjects, true);
+        const hoverLabel = document.getElementById("hoverLabel");
+        if (intersects.length > 0) {
+          let hoveredObj = getDraggableObject(intersects[0].object);
+          if (hoveredObj) {
+            hoverLabel.textContent = hoveredObj.userData.type;
+            hoverLabel.style.left = (event.clientX + 10) + "px";
+            hoverLabel.style.top = (event.clientY + 10) + "px";
+            hoverLabel.style.display = "block";
+          }
+        } else {
+          hoverLabel.style.display = "none";
+        }
+      }
+    }
+
+    function onMouseUp(event) {
+      event.preventDefault();
+      if (selectedObject) {
+        // Pot(0,0,0) 근처로 드롭 시 카운터 증가
+        let distance = selectedObject.position.distanceTo(new THREE.Vector3(0, 0, 0));
+        if (distance < 1) {
+          let type = selectedObject.userData.type;
+          if (type === "Noodle") noodleCount++;
+          else if (type === "Onion") onionCount++;
+          else if (type === "Spice") spiceCount++;
+          else if (type === "Egg") eggCount++;
+          updateUI();
+        }
+        // 복제본 제거
+        scene.remove(selectedObject);
+        selectedObject = null;
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    // COOK 버튼 클릭 시 결과 판단
+    function onCook() {
+      // Noodle, Onion, Spice의 카운터가 동일하며 Heat가 LOW 또는 MID이면 Good
+      if (noodleCount === onionCount && onionCount === spiceCount &&
+          (heatStates[heatStateIndex] === "LOW" || heatStates[heatStateIndex] === "MID")) {
+        showResult("Good Balancing!");
+      } else {
+        showResult("Fail... Balancing flavour is important!");
+      }
+    }
+
+    // 결과 페이지 표시 (실패 시 재시도 버튼 포함)
+    function showResult(result) {
+      if (result === "Fail... Balancing flavour is important!") {
+        document.body.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-size:48px; color:white; background: #FEFCE7;">
+            <div>${result}</div>
+            <button onclick="window.location.reload()" style="margin-top:20px; padding:10px 20px; font-size:24px;">Try Again</button>
+          </div>
+        `;
+      } else {
+        document.body.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:center; height:100vh; font-size:48px; color:white; background: #FEFCE7;">
+            ${result}
+          </div>
+        `;
+      }
+    }
+
+    // 텍스트 스프라이트 생성 함수 (canvas 기반)
+    function createTextSprite(message, parameters) {
+      if (parameters === undefined) parameters = {};
+      let fontface = parameters.fontface || "Arial";
+      let fontsize = parameters.fontsize || 24;
+      let borderThickness = parameters.borderThickness !== undefined ? parameters.borderThickness : 2;
+      let borderColor = parameters.borderColor || { r:0, g:0, b:0, a:1.0 };
+      let backgroundColor = parameters.backgroundColor || { r:255, g:255, b:255, a:1.0 };
+
+      let canvas = document.createElement('canvas');
+      let context = canvas.getContext('2d');
+      context.font = fontsize + "px " + fontface;
+
+      // 텍스트 크기 측정
+      let metrics = context.measureText(message);
+      let textWidth = metrics.width;
+      canvas.width = textWidth + borderThickness * 4;
+      canvas.height = fontsize * 1.4 + borderThickness * 4;
+
+      // 배경색 및 테두리 설정
+      context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
+      context.lineWidth = borderThickness;
+      context.strokeRect(0, 0, canvas.width, canvas.height);
+
+      // 텍스트 그리기
+      context.fillStyle = "black";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.font = fontsize + "px " + fontface;
+      context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+      let texture = new THREE.Texture(canvas);
+      texture.needsUpdate = true;
+      let spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+      let sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(canvas.width / 100, canvas.height / 100, 1);
+      return sprite;
+    }
+  </script>
+</body>
+</html>
